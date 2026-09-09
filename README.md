@@ -67,3 +67,7 @@ Claude 是否经 MCP 直接发送消息尚未确定，因此目前没有创建 `
 - 已记录待修复问题：AI 生成期间到达的新消息可能被后入库的 out 消息挡住。修复思路是在 `replies/` 中按 `last_processed_inbound_id` 记录实际处理进度，而不是根据最后一条 out 推断哪些消息已处理；尚未实现。
 
 目录调整时同步更新本文件，避免结构和说明脱节。
+
+## 当前服务入口
+
+`main.py` 已接入统一配置、网关客户端、MySQL Repository 和同步线程的启动/停止。运行 `.\.venv\Scripts\python.exe main.py`。接收默认关闭，通过 `config.toml` 的 `enabled_on_startup` 控制，修改后重启生效，无 HTTP 开关接口。MySQL 普通配置在 `[mysql]`，密码在 `.env`。使用单进程，详见 [配置说明](docs/配置说明.md)。此前“尚未实现”的描述为历史规划，当前已完成入口接线和模拟测试，尚未执行真实同步。

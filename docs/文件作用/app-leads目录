@@ -1,0 +1,31 @@
+数据从谷歌表单
+->
+gateway_client
+            网关负责：读取统一配置，向 Apps Script 发送请求：
+            - get_tail()：获取当前末行和下一行号。
+            - read_rows(start_row)：从指定行开始，按配置批量读取。
+            - 校验返回结果，明确报告超时、认证失败和数据格式错误。
+
+lead_mapper.py
+    负责：将表单的24 列转换成 leads 表字段
+       和清理空格和空值。
+        将 true/false 转成布尔值。
+        将带时区的时间转换成 MySQL 可保存的时间。
+        标准化 whatsapp_number。
+        保存原始 headers 和 values 到 raw_data。
+        第一列 id 为空时跳过该行。
+        表头数量不足或顺序不符合预期时直接报错。
+
+models.py
+    定义一个 LeadRecord 数据对象，统一表示转换后的线索，避免后续数据库代码直接操作不明格式的列表。
+
+lead_repository.py
+        作用：
+        - 接收 LeadRecord。
+        - 将 24 列数据对应到 leads 表字段。
+        - 批量执行 INSERT。（使用数据库事务：整批成功才提交，失败则回滚。
+                            返回统计结果：- 新增多少条；- 跳过多少条；)
+
+sync_service.py   执行增量同步流程服务
+
+runtime_state.py      保存内存状态<br/>接收开关、下一行号、同步中标记<br/>上次时间、错误和统计

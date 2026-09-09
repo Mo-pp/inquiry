@@ -57,10 +57,27 @@ class GoogleSheetsSettings:
 
 
 @dataclass(frozen=True, slots=True)
+class MySQLSettings:
+    host: str
+    port: int
+    user: str
+    database: str
+    password: str = field(repr=False)
+    connection_timeout: int = 10
+
+    def connect_kwargs(self) -> dict[str, object]:
+        return dict(host=self.host, port=self.port, user=self.user,
+                    database=self.database, password=self.password,
+                    connection_timeout=self.connection_timeout, charset="utf8mb4",
+                    autocommit=False, sql_mode="STRICT_ALL_TABLES")
+
+
+@dataclass(frozen=True, slots=True)
 class Settings:
     """整个 Python 服务统一使用的配置对象。"""
 
     google_sheets: GoogleSheetsSettings
+    mysql: MySQLSettings
 
 
 def load_settings(
@@ -91,14 +108,30 @@ def load_settings(
         raise SettingsError("config.toml 缺少 [google_sheets] 配置段")
 
     url = _required_env("GOOGLE_APPS_SCRIPT_URL", env_values)
-    token = _required_env("GOOGLE_APPS_SCRIPT_TOKEN", env_values)
+    enabled = _boolean(google_config, "enabled_on_startup")
+    token = (os.environ.get("GOOGLE_APPS_SCRIPT_TOKEN", env_values.get("GOOGLE_APPS_SCRIPT_TOKEN")) or "").strip()
     _validate_apps_script_url(url)
-    if len(token) < 32:
+    if (enabled or token) and len(token) < 32:
         raise SettingsError("GOOGLE_APPS_SCRIPT_TOKEN 至少需要 32 个字符")
     if token == "replace-with-a-long-random-secret":
         raise SettingsError("请替换 GOOGLE_APPS_SCRIPT_TOKEN 示例占位值")
 
+    mysql_config = raw_config.get("mysql")
+    if not isinstance(mysql_config, dict):
+        raise SettingsError("config.toml 缺少 [mysql] 配置段")
+    for name in ("host", "user", "database"):
+        if not isinstance(mysql_config.get(name), str) or not mysql_config[name].strip():
+            raise SettingsError(f"mysql.{name} 必须是非空字符串")
+    for name, maximum in (("port", 65535), ("connection_timeout", 300)):
+        value = mysql_config.get(name)
+        if type(value) is not int or not 1 <= value <= maximum:
+            raise SettingsError(f"mysql.{name} 必须是 1～{maximum} 的整数")
+    password = os.environ.get("MYSQL_PASSWORD", env_values.get("MYSQL_PASSWORD")) or ""
+    if enabled and not password:
+        raise SettingsError("MYSQL_PASSWORD 未配置")
+
     return Settings(
+        mysql=MySQLSettings(password=password, **mysql_config),
         google_sheets=GoogleSheetsSettings(
             apps_script_url=url,
             apps_script_token=token,

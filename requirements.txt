@@ -6,3 +6,9 @@ fastapi>=0.115,<1.0
 
 # 运行 FastAPI 的本地 ASGI 服务。
 uvicorn[standard]>=0.30,<1.0
+
+# Apps Script HTTP 客户端
+httpx>=0.27,<1.0
+
+# MySQL 事务和 leads 入库。
+mysql-connector-python>=9.0,<10.0

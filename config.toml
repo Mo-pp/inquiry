@@ -9,8 +9,8 @@
 gid = 0
 
 # Python 在接收开启期间检查 Google 表格新增行的时间间隔，单位为秒。
-# 例如设为 5，表示一轮完成后约 5 秒再检查下一轮。
-poll_interval_seconds = 5
+# 例如设为 60，表示一轮完成后约 60 秒再检查下一轮。
+poll_interval_seconds = 60
 
 # 每次向 Apps Script 请求的最大数据行数。
 # 网关允许 1～500；如果一次新增超过此数量，Python 后续会分批读取。
@@ -21,6 +21,18 @@ batch_size = 100
 request_timeout_seconds = 30
 
 # Python 服务启动时是否自动开启 Google 表格接收。
-# 建议保持 false；需要正式接收时再通过后续的运行时开关开启。
-# 无论这里为何值，每次打开接收都会先取得当时表格末行并跳过此前数据。
-enabled_on_startup = false
+# 默认 false：不请求网关，不启动接收轮询；不影响其他客户处理模块。
+# 修改为 true 或 false 后，需要停止并重新启动 Python 服务才生效。
+# 暂不提供 FastAPI 开关接口，也不自动监测本文件的修改。
+# true 启动时先取得当时表格末行，跳过历史以及关闭期间新增的数据。
+# 清库前先改为 false，等待旧服务正常停止，再重启并确认“接收已关闭”。
+enabled_on_startup = true             # Python 服务启动时是否自动开启 Google 表格接收。
+
+# MySQL 普通配置；密码只放在 .env。修改后重启生效。
+[mysql]
+host = "127.0.0.1"
+port = 3306
+user = "root"
+database = "lintratek_chat"
+# 建立连接超时秒数。
+connection_timeout = 10
