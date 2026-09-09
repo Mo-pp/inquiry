@@ -1,0 +1,12 @@
+# 本机秘密
+.env
+
+# Python 生成文件和虚拟环境
+__pycache__/
+*.py[cod]
+.venv/
+
+# 测试及工具缓存
+.pytest_cache/
+.coverage
+htmlcov/
