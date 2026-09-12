@@ -26,13 +26,14 @@ request_timeout_seconds = 30
 # 暂不提供 FastAPI 开关接口，也不自动监测本文件的修改。
 # true 启动时先取得当时表格末行，跳过历史以及关闭期间新增的数据。
 # 清库前先改为 false，等待旧服务正常停止，再重启并确认“接收已关闭”。
-enabled_on_startup = true             # Python 服务启动时是否自动开启 Google 表格接收。
+enabled_on_startup = false            # Python 服务启动时是否自动开启 Google 表格接收。
 
 # MySQL 普通配置；密码只放在 .env。修改后重启生效。
+# 数据库为 2026-09-12 新建的新系统专用库 lintratek_AI，与旧系统的 lintratek_chat 完全隔离。
 [mysql]
 host = "127.0.0.1"
 port = 3306
 user = "root"
-database = "lintratek_chat"
+database = "lintratek_AI"
 # 建立连接超时秒数。
 connection_timeout = 10

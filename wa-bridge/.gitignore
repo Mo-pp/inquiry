@@ -1,0 +1,5 @@
+.env
+node_modules/
+.wa-session/
+.wwebjs_cache/
+*.log

@@ -1,0 +1,36 @@
+# 首次联系话术：直接修改下面的英文正文，保存后下次拼装即生效。
+# {channel} 和五个答案占位符由程序填入，请保持占位符名称不变。
+# 正文如需显示普通花括号，请写成 {{ 和 }}；客户答案中的花括号无需处理。
+message = """
+Hi, my friend. I'm Luna. We are a factory manufacturing mobile signal enhancement systems and high-power signal boosters.
+
+I saw your inquiry on {channel}. Do you currently have a project that needs improved mobile signal coverage?
+
+Here is the information you submitted in the form:
+
+1. Which category best describes you?
+Your answer: {business_role_answer}
+
+2. In which country would you like to use the signal booster?
+Your answer: {target_country_answer}
+
+3. What area do you need to cover with a signal booster: over 500 square meters or less than 500 square meters?
+Your answer: {coverage_area_answer}
+
+4. Are you purchasing our products for your own use or for resale?
+Your answer: {purchase_purpose_answer}
+
+5. What frequency bands do you need? What are your budget and required quantity?
+Your answer: {frequency_budget_quantity_answer}
+
+Could you please confirm whether the information above is correct?
+"""
+
+missing_answer = "Not provided"
+unknown_channel = "social media"
+
+[channels]
+fb = "Facebook"
+facebook = "Facebook"
+ig = "Instagram"
+instagram = "Instagram"

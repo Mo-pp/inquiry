@@ -8,6 +8,24 @@ class LeadInsertStats: inserted:int; skipped:int
 class LeadRepository:
     columns=('source_lead_id','created_time','ad_id','ad_name','adset_id','adset_name','campaign_id','campaign_name','form_id','form_name','is_organic','platform','business_role_answer','target_country_answer','coverage_area_answer','purchase_purpose_answer','frequency_budget_quantity_answer','email','whatsapp_number','full_name','company_name','website','job_title','lead_status','customer_added','raw_data')
     def __init__(self, connection_factory): self.connection_factory=connection_factory
+    def get_by_id(self, source_lead_id: str) -> dict | None:
+        """只读查询一条线索，供首次联系预览使用。"""
+        conn = self.connection_factory()
+        cur = None
+        try:
+            cur = conn.cursor(dictionary=True)
+            cur.execute(
+                "SELECT * FROM leads WHERE source_lead_id = %s",
+                (source_lead_id,),
+            )
+            return cur.fetchone()
+        finally:
+            try:
+                if cur is not None:
+                    cur.close()
+            finally:
+                conn.close()
+
     def append(self, leads:Iterable[LeadRecord]):
         conn=self.connection_factory(); cur=None; inserted=skipped=0
         sql='INSERT INTO leads ('+','.join(self.columns)+') VALUES ('+','.join(['%s']*26)+')'

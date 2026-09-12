@@ -2,7 +2,7 @@
 
 项目采用一个 Python 常驻服务处理业务，`wa-bridge` 负责 WhatsApp 收发。以下目录已创建，目前业务模块尚未实现；目录说明用于约定后续代码放在哪里。
 
-已定义线索表：`migrations/001_create_leads.sql` 沿用旧项目 `schema.sql` 中最终版本的 `customer_leads` 字段、类型、默认值及索引列，表名改为 `leads`，对应索引改名，并显式指定 InnoDB。`source_lead_id` 为主键，`customer_added` 保留原字段，默认 `FALSE`。该文件仅包含建表定义，不含删表操作。2026-09-08 已在本机 `lintratek_chat` 库执行，确认 `leads` 使用 InnoDB，包含 27 个字段、主键及两个普通索引。
+新系统使用专用数据库 `lintratek_AI`（2026-09-12 新建），与旧系统的 `lintratek_chat` 完全隔离，旧库中的在用表不受影响。`migrations/` 按编号执行：`000_create_database.sql` 建库；`001_create_leads.sql` 线索表，沿用旧项目 `schema.sql` 中最终版本的 `customer_leads` 字段、类型、默认值及索引列，表名改为 `leads`，另增加 `customer_id`（首次联系时写入对应的 `customers.customer_id`，导入时为 NULL）；`002_create_customers.sql` 客户主档；`003_create_messages.sql` 消息流水（in/out）。所有文件仅包含非破坏性定义，不含删表操作。建库建表当天已核验：三张表均为 InnoDB、utf8mb4，字段、索引与字符集符合预期。
 
 ## 目录结构与用途
 
@@ -38,7 +38,7 @@
 
 Google 表格只读网关已编写：`integrations/google_sheets/google_sheets_lead_gateway.gs`，提供获取末行和分批读取接口。部署步骤见 [Google表格网关部署](docs/Google表格网关部署.md)。Python 接收开关、轮询和入库模块尚未实现。
 
-统一配置层已编写：普通设置位于 `config.toml`，秘密位于本机 `.env`，由 `app/settings.py` 统一读取和校验。配置项说明见 [配置说明](docs/配置说明.md)。当前 `.env` 已填写网关地址，但访问令牌刻意留空；更换 Apps Script 的长令牌并在本机填写相同值后，配置才能通过校验。
+统一配置层已编写：普通设置位于 `config.toml`，秘密位于本机 `.env`，由 `app/settings.py` 统一读取和校验。配置项说明见 [配置说明](docs/配置说明.md)。`.env` 已填写网关地址与 32 位访问令牌（与 Apps Script 脚本属性 `ACCESS_TOKEN` 相同）。
 
 这些 `app/` 子目录是同一个 Python 服务中的模块，不是分别启动的独立服务。
 
@@ -68,6 +68,29 @@ Claude 是否经 MCP 直接发送消息尚未确定，因此目前没有创建 `
 
 目录调整时同步更新本文件，避免结构和说明脱节。
 
-## 当前服务入口
+## 首次联系模板预览
 
-`main.py` 已接入统一配置、网关客户端、MySQL Repository 和同步线程的启动/停止。运行 `.\.venv\Scripts\python.exe main.py`。接收默认关闭，通过 `config.toml` 的 `enabled_on_startup` 控制，修改后重启生效，无 HTTP 开关接口。MySQL 普通配置在 `[mysql]`，密码在 `.env`。使用单进程，详见 [配置说明](docs/配置说明.md)。此前“尚未实现”的描述为历史规划，当前已完成入口接线和模拟测试，尚未执行真实同步。
+首次联系消息拼装已实现，尚未接入定时扫描或 WhatsApp 发送。新增三个文件：
+
+- `templates/first_contact.toml`：英文话术、渠道名称和空答案提示。修改保存后，下次拼装即生效，无需重启。保留 `{channel}` 和五个答案占位符名称；正文中的普通花括号写成 `{{` / `}}`。
+- `app/leads/first_contact_template.py`：`build_first_contact_message(lead)` 接收数据库行字典，返回纯文本。项目询问使用固定问句，五个答案保留原文，空答案显示 `Not provided`。
+- `tools/preview_first_contact.py`：通过现有 Repository 按 `source_lead_id` 只读查询并打印消息。使用已有 `config.toml` / `.env` 配置，不启动同步、不发送、不修改客户或线索。该工具可独立删除，不影响拼装功能。
+
+在项目根目录运行（把示例 ID 替换为实际线索 ID）：
+
+```powershell
+.\.venv\Scripts\python.exe tools\preview_first_contact.py "实际的source_lead_id"
+```
+
+线索不存在时打印提示并以退出码 1 结束；配置或数据库错误直接报错，便于修正后再次预览。
+
+## 当前服务启动方式
+
+WhatsApp 桥的独立启动入口已实现，详见 `wa-bridge/README.md`。
+支持扫码登录、保存独立会话和 `GET /health` 状态查询。
+wa 侧私聊文字归轮及回复发送已实现：每个客户静默 20 秒封闭一轮，并行请求外部 Python，按客户轮次顺序发送。
+`WA_TURNS_ENABLED` 默认关闭，Python 轮次接口尚未实现，尚未进行真实收发联调。
+首次联系号码检查、leads 扫描仍未接入。接口契约与文件职责见桥的 README。
+在 `wa-bridge/` 下运行 `npm.cmd start`；默认监听本机端口 3010。
+
+`main.py` 已接入统一配置、网关客户端、MySQL Repository 和同步线程的启动/停止。运行 `.\.venv\Scripts\python.exe main.py`。接收默认关闭，通过 `config.toml` 的 `enabled_on_startup` 控制，修改后重启生效，无 HTTP 开关接口。MySQL 普通配置在 `[mysql]`，密码在 `.env`。使用单进程，详见 [配置说明](docs/配置说明.md)。此前“尚未实现”的描述为历史规划，当前已完成入口接线，并于 2026-09-12 完成真实同步验证（表格新增整行成功入库）；随后按测试约定关闭接收并清空 `leads`。

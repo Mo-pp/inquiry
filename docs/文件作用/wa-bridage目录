@@ -1,0 +1,12 @@
+wa-bridge是可以调用WhatsApp api的服务
+
+
+
+文件安排如下，新增 2 个核心文件，修改 4 个现有代码文件：
+文件	怎么改、负责什么
+新增 src/turn-manager.js	核心逻辑：按客户管理状态、消息归轮、20 秒计时、并行提交、暂存回复、顺序发送
+新增 src/python-client.js	封装两个 HTTP 请求：申请轮次、提交整轮消息；校验返回的电话和轮次是否匹配
+修改 src/whatsapp-client.js	增加客户入站消息监听，提供消息 ID、电话、实际聊天 ID、正文；增加文本发送方法
+修改 src/server.js	连接 WhatsApp、轮次管理器和 Python 客户端；停止服务时清理计时器
+修改 src/config.js	读取 Python 地址、静默时间等配置
+修改 src/app.js	无需改动，继续提供 /health
