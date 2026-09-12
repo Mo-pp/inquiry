@@ -8,6 +8,8 @@ from app.settings import load_settings
 from app.leads.gateway_client import GoogleSheetsGatewayClient
 from app.leads.lead_repository import LeadRepository
 from app.leads.sync_service import LeadSyncService
+from app.leads.first_contact_service import FirstContactService
+from app.messages.wa_bridge_client import WaBridgeClient
 
 
 @asynccontextmanager
@@ -18,14 +20,24 @@ async def lifespan(app: FastAPI):
     repository = LeadRepository(lambda: mysql.connector.connect(**settings.mysql.connect_kwargs()))
     service = LeadSyncService(settings.google_sheets, gateway, repository)
     app.state.lead_sync = service
+    bridge = WaBridgeClient(settings.wa_bridge)
+    first_contact = FirstContactService(repository, bridge, settings.first_contact)
+    app.state.first_contact = first_contact
     try:
         await run_in_threadpool(service.start)
+        first_contact.start()
         yield
     finally:
         try:
-            await run_in_threadpool(service.stop)
+            await run_in_threadpool(first_contact.stop)
         finally:
-            await run_in_threadpool(gateway.close)
+            try:
+                await run_in_threadpool(service.stop)
+            finally:
+                try:
+                    await run_in_threadpool(bridge.close)
+                finally:
+                    await run_in_threadpool(gateway.close)
 
 app = FastAPI(lifespan=lifespan)
 

@@ -73,11 +73,26 @@ class MySQLSettings:
 
 
 @dataclass(frozen=True, slots=True)
+class WaBridgeSettings:
+    base_url: str = "http://127.0.0.1:3010"
+    request_timeout_seconds: float = 60
+
+
+@dataclass(frozen=True, slots=True)
+class FirstContactSettings:
+    enabled_on_startup: bool = False
+    poll_interval_seconds: float = 20
+    batch_size: int = 20
+
+
+@dataclass(frozen=True, slots=True)
 class Settings:
     """整个 Python 服务统一使用的配置对象。"""
 
     google_sheets: GoogleSheetsSettings
     mysql: MySQLSettings
+    wa_bridge: WaBridgeSettings = field(default_factory=WaBridgeSettings)
+    first_contact: FirstContactSettings = field(default_factory=FirstContactSettings)
 
 
 def load_settings(
@@ -130,7 +145,36 @@ def load_settings(
     if enabled and not password:
         raise SettingsError("MYSQL_PASSWORD 未配置")
 
+    bridge_config = raw_config.get("wa_bridge", {})
+    if not isinstance(bridge_config, dict):
+        raise SettingsError("wa_bridge 必须是配置段")
+    bridge_url = bridge_config.get("base_url", "http://127.0.0.1:3010")
+    if not isinstance(bridge_url, str):
+        raise SettingsError("wa_bridge.base_url 必须是 HTTP(S) 地址")
+    parsed_bridge = urlparse(bridge_url)
+    if (parsed_bridge.scheme not in {"http", "https"} or not parsed_bridge.hostname
+            or parsed_bridge.query or parsed_bridge.fragment or parsed_bridge.username):
+        raise SettingsError("wa_bridge.base_url 必须是无查询参数或用户信息的 HTTP(S) 地址")
+    bridge_timeout = bridge_config.get("request_timeout_seconds", 60)
+    if (type(bridge_timeout) not in {int, float} or not 0 < bridge_timeout <= 300):
+        raise SettingsError("wa_bridge.request_timeout_seconds 必须大于 0 且不超过 300")
+
+    contact_config = raw_config.get("first_contact", {})
+    if not isinstance(contact_config, dict):
+        raise SettingsError("first_contact 必须是配置段")
+    contact_enabled = contact_config.get("enabled_on_startup", False)
+    contact_interval = contact_config.get("poll_interval_seconds", 20)
+    contact_batch = contact_config.get("batch_size", 20)
+    if type(contact_enabled) is not bool:
+        raise SettingsError("first_contact.enabled_on_startup 必须是 true 或 false")
+    if type(contact_interval) not in {int, float} or not 0 < contact_interval <= 86400:
+        raise SettingsError("first_contact.poll_interval_seconds 必须大于 0 且不超过 86400")
+    if type(contact_batch) is not int or not 1 <= contact_batch <= 500:
+        raise SettingsError("first_contact.batch_size 必须为 1～500 的整数")
+
     return Settings(
+        first_contact=FirstContactSettings(contact_enabled, contact_interval, contact_batch),
+        wa_bridge=WaBridgeSettings(bridge_url.rstrip("/"), bridge_timeout),
         mysql=MySQLSettings(password=password, **mysql_config),
         google_sheets=GoogleSheetsSettings(
             apps_script_url=url,

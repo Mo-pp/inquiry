@@ -70,7 +70,7 @@ Claude 是否经 MCP 直接发送消息尚未确定，因此目前没有创建 `
 
 ## 首次联系模板预览
 
-首次联系消息拼装已实现，尚未接入定时扫描或 WhatsApp 发送。新增三个文件：
+首次联系消息拼装已实现，也已供手动处理和自动扫描复用。预览相关三个文件：
 
 - `templates/first_contact.toml`：英文话术、渠道名称和空答案提示。修改保存后，下次拼装即生效，无需重启。保留 `{channel}` 和五个答案占位符名称；正文中的普通花括号写成 `{{` / `}}`。
 - `app/leads/first_contact_template.py`：`build_first_contact_message(lead)` 接收数据库行字典，返回纯文本。项目询问使用固定问句，五个答案保留原文，空答案显示 `Not provided`。
@@ -90,7 +90,54 @@ WhatsApp 桥的独立启动入口已实现，详见 `wa-bridge/README.md`。
 支持扫码登录、保存独立会话和 `GET /health` 状态查询。
 wa 侧私聊文字归轮及回复发送已实现：每个客户静默 20 秒封闭一轮，并行请求外部 Python，按客户轮次顺序发送。
 `WA_TURNS_ENABLED` 默认关闭，Python 轮次接口尚未实现，尚未进行真实收发联调。
-首次联系号码检查、leads 扫描仍未接入。接口契约与文件职责见桥的 README。
+首次联系号码检查、发送和 leads 扫描已接入 Python；默认关闭自动首次联系。
+接口契约与文件职责见桥的 README。
 在 `wa-bridge/` 下运行 `npm.cmd start`；默认监听本机端口 3010。
+
+## 首次联系处理与自动扫描
+
+文件职责：
+
+| 文件 | 职责 |
+| --- | --- |
+| `app/messages/wa_bridge_client.py` | 通过 HTTP 检查号码和发送文本，校验桥的返回结果；不重试发送 |
+| `app/leads/first_contact_service.py` | `process_one` 处理一条 lead；后台线程每轮完成后等 20 秒，默认不开启 |
+| `app/leads/lead_repository.py` | 查线索、扫描未联系线索；发送成功后统一事务保存客户、消息、lead 标记 |
+| `tools/process_first_contact.py` | 按指定 lead ID 手动执行一次真实联系 |
+| `config.toml` / `app/settings.py` | 桥地址、请求超时、首次联系开关、扫描间隔及批量大小 |
+| `main.py` | 启停同步与首次联系线程；先等待业务结束，再关闭 HTTP 客户端 |
+
+单条处理顺序：读取 lead → 已联系则跳过 → 整理号码并拼模板 → 检查注册 → 发送 →
+成功后同一事务创建/复用 customers、写入 out messages、回写 leads.customer_id 和 customer_added=true。
+同号码复用客户，一条新表单仍发送一次；不覆盖已有客户姓名和首次联系时间，不修改 lead_status。
+号码仅清理空格、括号和连字符，必须已含 `+` 和国家区号；不猜区号，不修改 lead 原始号码。
+contacted_at 使用发送成功后的 UTC 时间；未返回平台时间时 messages.platform_time 留空。
+
+手动执行（这条命令会真实发送，预览请使用上面的 preview 工具）：
+
+```powershell
+.\.venv\Scripts\python.exe tools\process_first_contact.py "实际的source_lead_id"
+```
+
+自动执行：确保桥 ready，设置 `[first_contact].enabled_on_startup = true`，再启动/重启 main.py。
+该开关与 `[google_sheets].enabled_on_startup` 独立；Google 接收保持关闭也可处理手工入库线索。
+开启后会处理库中所有 customer_added=false 的线索，不限新插入的测试线索。
+每轮最多 20 条，按 source_lead_id 分批向后扫描，到末尾再从头查，避免无效号码挡住后面的线索。
+未注册或发送前明确失败：不建客户、不标记已联系，记日志并继续后续线索，以后扫描还会检查。
+正常退出会等当前线索处理及入库结束，然后停止，不再开始下一条。
+
+发送结果不确定或发送成功后数据库保存未确认：报错并停止该次自动扫描，需人工核对再重启。
+暂停原因仅在内存和日志中，重启会重新扫描；未核对前不要重启或手动重发该 lead。
+尚无跨进程防重复/补偿机制；只运行一个 main.py，不和手动发送工具并行。
+进程恰好在发送后、标记前崩溃仍可能导致重复，第一版暂不引入复杂状态机。
+
+测试：`python -m unittest discover -s tests` 和 `npm.cmd --prefix wa-bridge test`。
+设置 `FIRST_CONTACT_TEST_MYSQL=1` 可运行 MySQL 集成测试，只写本连接的临时表，HTTP 模拟发送。
+已验证模拟完整联系、下一轮跳过、同号码复用客户和事务失败回滚。
+2026-09-12 已完成用户指定号码的真实测试：首次发送发现 WhatsApp MsgKey 字段兼容问题，
+核对实际消息后补记发送；修正后另建复测 lead，完整自动完成发送、客户复用、消息保存及已联系标记。
+复测等待超过 20 秒后确认没有重复发送。两条测试 lead 和两条发送记录保留在本机数据库。
+20 项 Python 测试（含 MySQL 临时表事务验证）及 15 项 Node 测试通过。
+测试扫描已停止；Google 接收和常驻服务的自动首次联系开关仍为 false。
 
 `main.py` 已接入统一配置、网关客户端、MySQL Repository 和同步线程的启动/停止。运行 `.\.venv\Scripts\python.exe main.py`。接收默认关闭，通过 `config.toml` 的 `enabled_on_startup` 控制，修改后重启生效，无 HTTP 开关接口。MySQL 普通配置在 `[mysql]`，密码在 `.env`。使用单进程，详见 [配置说明](docs/配置说明.md)。此前“尚未实现”的描述为历史规划，当前已完成入口接线，并于 2026-09-12 完成真实同步验证（表格新增整行成功入库）；随后按测试约定关闭接收并清空 `leads`。

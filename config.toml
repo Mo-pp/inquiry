@@ -37,3 +37,18 @@ user = "root"
 database = "lintratek_AI"
 # 建立连接超时秒数。
 connection_timeout = 10
+
+[wa_bridge]
+# Python 调用本机 WhatsApp 桥；不会因配置本段而启动扫描或发送。
+base_url = "http://127.0.0.1:3010"
+# 请求超时不等于发送失败；发送超时需要人工检查，不自动重发。
+request_timeout_seconds = 60
+
+[first_contact]
+# 自动首次联系开关，独立于 Google 表格同步。准备测试 lead 后再开启。
+# 开启后会处理库中所有未联系线索；修改后需要重启 Python 服务。
+enabled_on_startup = false
+# 每一轮完成后等待的秒数。
+poll_interval_seconds = 20
+# 每轮最多处理的线索数量，单进程逐条发送。
+batch_size = 20

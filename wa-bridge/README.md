@@ -1,8 +1,9 @@
 # WhatsApp 桥：登录、私聊文字归轮与回复发送
 
 从旧项目提取，使用 whatsapp-web.js 1.34.7 和本机 Google Chrome。
-HTTP 服务提供 GET /health。可选开启私聊文字归轮：调用外部 Python 接口处理，
-再通过 WhatsApp 发送回复。不连接业务数据库，不扫描 leads，不提供首次联系发送接口。
+HTTP 服务提供 GET /health、POST /messages/check 和 POST /messages/send。
+可选开启私聊文字归轮：调用外部 Python 接口处理，再通过 WhatsApp 发送回复。
+桥不连接业务数据库、不扫描 leads；Python 可调用发送接口发送首次联系模板。
 
 ## 安装与启动
 
@@ -36,8 +37,8 @@ disconnected、initialization_failed。只有 ready 表示客户端已就绪；H
 
 - src/server.js：启动 HTTP 和 WhatsApp，处理正常退出。
 - src/config.js：读取 .env；固定监听 127.0.0.1，默认端口 3010，自动查找 Chrome。
-- src/whatsapp-client.js：二维码、登录状态、会话恢复和浏览器关闭。
-- src/app.js：GET /health。
+- src/whatsapp-client.js：二维码、登录状态、会话恢复、号码注册检查和浏览器关闭。
+- src/app.js：GET /health、POST /messages/check、POST /messages/send。
 - src/turn-manager.js：每个客户独立归轮、20 秒静默计时、并行提交、按轮次顺序发送。
 - src/python-client.js：申请轮次与提交消息的 HTTP 调用，校验回复的 phone / turn_id。
 - .env.example / .env：配置示例 / 本机配置，修改后重启生效。
@@ -46,7 +47,72 @@ disconnected、initialization_failed。只有 ready 表示客户端已就绪；H
 
 若端口被旧桥占用，修改新桥 .env 的 WA_BRIDGE_PORT 后重启。
 
+## 检查号码是否注册 WhatsApp
+
+`POST /messages/check`，Content-Type 为 `application/json`：
+
+```json
+{"phone":"+8613800000000"}
+```
+
+phone 必须是字符串，使用带 `+` 和国家代码的国际格式，不含空格或连字符。
+格式不正确直接报错，不自动推断国家代码。
+
+已注册返回 HTTP 200：
+
+```json
+{"status":"registered","phone":"+8613800000000","chat_jid":"WhatsApp返回的ID"}
+```
+
+未注册也返回 HTTP 200，status 为 `not_registered`，chat_jid 为 null。
+chat_jid 可能以 `@lid` 或 `@c.us` 结尾，不可把 LID 当电话号码。
+检查只确认注册状态，不保存联系人、不发送消息、不表示已经联系，也不保证后续发送成功。
+
+错误统一返回 `{"detail":"错误说明"}`：400 请求或号码格式错误；
+503 WhatsApp 未就绪；413 请求超过 32KB；500 底层查询失败（不能当作未注册）。
+
+```powershell
+Invoke-RestMethod -Method Post http://127.0.0.1:3010/messages/check `
+  -ContentType 'application/json' -Body '{"phone":"+8613800000000"}'
+```
+
+示例号码仅展示格式，验证时替换为测试号码。
+
+## 按号码发送文本
+
+`POST /messages/send`，Content-Type 为 `application/json`：
+
+```json
+{"phone":"+8613800000000","text":"Hi, I'm Luna..."}
+```
+
+桥检查号码注册状态；LID 首次聊天优先使用库解析的电话 JID 发送。
+正文保留原文，不能为空；JSON 请求上限 32KB。该接口无需开启 WA_TURNS_ENABLED。
+
+取得平台消息 ID 返回 HTTP 200：
+
+```json
+{"status":"sent","phone":"+8613800000000","chat_jid":"WhatsApp返回的ID","message_id":"平台消息ID"}
+```
+
+`sent` 仅表示发送操作返回消息 ID，不代表送达或已读。
+进入发送操作后异常或没有消息 ID，返回 HTTP 200、status=`submitted_unknown`、message_id=null。
+此时可能已经发出，调用方必须人工核对，不自动重发。HTTP 200 本身不代表发送成功。
+400 格式错误、404 号码未注册、413 请求过大、503 未就绪均在发送前拒绝；
+号码查询异常返回 500，号码映射冲突返回 502，错误格式为 `{"detail":"错误说明"}`。
+网络超时/断开也可能发生在发送之后；桥不提供请求去重或自动重试。
+
+`sendToPhone(phone, text)` 与已有 `sendText(chatId, text)` 共用 `_sendText` 实际发送。
+私聊回复在未取得消息 ID 时仍抛错阻挡后续回复，保持原行为。
+
+2026-09-12 实测修正：当前 WhatsApp Web 的 MsgKey 使用 `$1` 保存完整消息 ID，
+whatsapp-web.js 1.34.7 仍用 `_serialized` 回查发送结果。发送前仅在缺少该属性时
+补同义 getter，避免实际发出后返回 undefined；不覆盖已有实现，不依靠历史消息猜测发送结果。
+已完成真实发送、返回消息 ID 和 Python 入库联调。
+
 ## 私聊文字归轮
+
+号码检查功能不依赖私聊文字归轮开关。
 
 先配置 Python 的两个接口，再在 .env 中设置并重启桥：
 

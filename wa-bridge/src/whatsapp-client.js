@@ -1,5 +1,13 @@
 "use strict";
 
+class BridgeError extends Error {
+  constructor(message, statusCode) {
+    super(message);
+    this.name = "BridgeError";
+    this.statusCode = statusCode;
+  }
+}
+
 class WhatsAppClient {
   constructor({ Client, LocalAuth, qrTerminal, config, onMessage = null }) {
     this.status = "starting";
@@ -67,6 +75,22 @@ class WhatsAppClient {
     return { status: this.status, ...(this.lastError ? { error: this.lastError } : {}) };
   }
 
+  async checkNumber(phone) {
+    if (typeof phone !== "string" || !/^\+[1-9]\d{5,14}$/.test(phone)) {
+      throw new BridgeError("phone must be an international number such as +8613800000000", 400);
+    }
+    if (this.status !== "ready") {
+      throw new BridgeError(`WhatsApp is not ready: ${this.status}`, 503);
+    }
+    const numberId = await this.client.getNumberId(phone.slice(1));
+    const chatId = numberId?._serialized || null;
+    return {
+      status: chatId ? "registered" : "not_registered",
+      phone,
+      chat_jid: chatId,
+    };
+  }
+
   receiveMessage(message) {
     if (!this.onMessage || message.fromMe || message.type !== "chat" || message.hasMedia ||
         typeof message.body !== "string" || !message.body.trim() ||
@@ -101,12 +125,67 @@ class WhatsAppClient {
     if (!/^\d+@(c\.us|lid)$/.test(chatId) || typeof text !== "string" || !text.trim()) {
       throw new Error("A private chat ID and non-empty reply are required");
     }
+    const messageId = await this._sendText(chatId, text);
+    if (!messageId) throw new Error("Send submitted without a message ID; keeping turn blocked");
+    return { message_id: messageId };
+  }
+
+  async _sendText(chatId, text) {
+    // 首次联系和私聊回复共用实际发送操作；各自处理不确定结果。
+    if (this.client.pupPage) {
+      await this.client.pupPage.evaluate(() => {
+        // WhatsApp Web 的 MsgKey 现以 $1 保存完整 ID；1.34.7 仍用
+        // _serialized 回查刚发出的消息。补同义属性，避免发送成功却返回 undefined。
+        const MsgKey = window.require('WAWebMsgKey');
+        if (!('_serialized' in MsgKey.prototype)) {
+          Object.defineProperty(MsgKey.prototype, '_serialized', {
+            configurable: true,
+            get() { return this.$1; },
+          });
+        }
+      });
+    }
     const message = await this.client.sendMessage(chatId, text, {
       waitUntilMsgSent: true, sendSeen: false,
     });
-    const messageId = message?.id?._serialized || message?.id?.id;
-    if (!messageId) throw new Error("Send submitted without a message ID; keeping turn blocked");
-    return { message_id: messageId };
+    const id = message?.id;
+    const value = typeof id === "string" ? id : id?._serialized || id?.serialized || id?.$1 || id?.id;
+    return typeof value === "string" && value.trim() ? value : null;
+  }
+
+  async sendToPhone(phone, text) {
+    if (typeof text !== "string" || !text.trim()) {
+      throw new BridgeError("text must be a non-empty string", 400);
+    }
+    const checked = await this.checkNumber(phone);
+    if (checked.status !== "registered") {
+      throw new BridgeError("phone is not registered on WhatsApp", 404);
+    }
+    let sendJid = checked.chat_jid;
+    // 沿用旧桥：首次联系 LID 号码时，优先使用库解析出的电话 JID。
+    if (sendJid.endsWith("@lid") && typeof this.client.getContactLidAndPhone === "function") {
+      const mappings = await this.client.getContactLidAndPhone([sendJid]);
+      const phoneJid = mappings?.[0]?.pn || mappings?.[0]?.phone;
+      if (typeof phoneJid === "string" && /^[1-9]\d{5,14}@c\.us$/.test(phoneJid)) {
+        if (phoneJid !== `${phone.slice(1)}@c.us`) {
+          throw new BridgeError("WhatsApp phone mapping does not match requested phone", 502);
+        }
+        sendJid = phoneJid;
+      }
+    }
+    let messageId = null;
+    try {
+      messageId = await this._sendText(sendJid, text);
+    } catch (error) {
+      // 进入发送操作后，异常不一定代表未发出；不得自动重试。
+      console.error("[wa-bridge] Send outcome unknown:", error.message);
+    }
+    return {
+      status: messageId ? "sent" : "submitted_unknown",
+      phone,
+      chat_jid: checked.chat_jid,
+      message_id: messageId,
+    };
   }
 
   async destroy() {
@@ -115,4 +194,4 @@ class WhatsAppClient {
   }
 }
 
-module.exports = { WhatsAppClient };
+module.exports = { WhatsAppClient, BridgeError };

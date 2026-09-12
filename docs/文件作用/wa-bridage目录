@@ -10,3 +10,9 @@ wa-bridge是可以调用WhatsApp api的服务
 修改 src/server.js	连接 WhatsApp、轮次管理器和 Python 客户端；停止服务时清理计时器
 修改 src/config.js	读取 Python 地址、静默时间等配置
 修改 src/app.js	无需改动，继续提供 /health
+
+
+
+
+wa-bridge/src/whatsapp-client.js	增加 checkNumber(phone)，调用 WhatsApp 检查号码，返回注册状态和聊天 ID
+wa-bridge/src/app.js	增加 POST /messages/check，接收 Python 传来的号码，调用上述方法并返回结果
